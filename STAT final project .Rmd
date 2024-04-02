@@ -1,0 +1,1150 @@
+---
+title: "Analyzing Burlington's Dog Community: Insights from Registered Dog Data"
+author: "Zoey Zhong"
+date: "2023-12-06"
+output: html_document
+---
+
+
+```{r setup, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center",
+                      message = F,
+                      warning = F)
+
+# Load the necessary library
+pacman::p_load(tidyverse, dplyr, ggplot2, patchwork, caret, caTools, MASS, class,wordcloud, tm,slam)
+
+# Changing default themes
+theme_set(theme_bw())
+theme_update(plot.title = element_text(hjust = 0.5) )
+
+# Setting the default choice for decimal places
+options(digits = 2)
+```
+
+
+###Introduction:
+This analysis focuses on a dataset of registered dogs in Burlington, Vermont, as of April 30, 2022, covering various aspects such as breed, color, age, size, and more for 794 dogs. The data, published by Burlington's Clerk Treasurer's Office, represents registered dogs but may not fully capture the city's entire dog population due to registration costs and exclusion of strays.
+
+Despite these limitations, the dataset offers valuable insights into Burlington's dog population and pet ownership trends. It includes detailed information on ten variables.
+
+Variables Description
+Below is a brief description of the features included in the dataset:
+
+*DogBreed*: Breed of the dog.
+
+*DogColor*: Color of the dog.
+
+*DogSex*: Sex of the dog (Male/Female).
+
+*DogSize*: Size category of the dog (Small/Medium/Large).
+
+*DogAge*: Age of the dog in years.
+
+*WeightRange*: Weight range of the dog.
+
+*DogName*: Name of the dog.
+
+*DogIsSpayedOrNuetered*: Indicates whether the dog is spayed or neutered (True/False).
+
+*City*: City where the dog is registered.
+
+*StateAbbrev*: State abbreviation where the dog is registered.
+
+#Research Question:
+How do the characteristics of registered dogs in Burlington, Vermont (such as breed, size, color, and age) reflect the preferences and demographics of the city's dog-owning population?
+
+
+## 1. Read in the data
+```{r 1. read dataset, message=FALSE, warning=FALSE}
+dogdata <- read.csv("Burlington_licensed_dogs.csv",na.strings = "")
+tibble(dogdata)
+```
+## 2. Dataset Cleaning
+```{r 2. cleaning data, message=FALSE, warning=FALSE}
+# Cleaning data 
+dogdata1 <- dogdata %>%
+  filter(complete.cases(dogdata))%>%
+  filter(!is.na(DogBreed), !is.na(DogSize), !is.na(DogName), !is.na(DogAge)) %>%  # Remove rows with missing values
+  na.omit(DogSize)%>%
+  na.omit(DogName) %>% 
+  # filter out unnecessary data
+  filter(!DogBreed == "BROWN W/BLACK",
+         !DogBreed == "UNKNOWN",
+         !DogBreed == "ALL AMERICAN DOG", 
+         !DogBreed == "CANINE",
+         !DogBreed == "TROIS ANS") %>% 
+   mutate(DogName = toupper(DogName),
+         breed = toupper(DogBreed),
+         color = toupper(DogColor),
+         DogAge = as.numeric(DogAge),
+         ) %>%  # Convert to uppercase and DogAge to numeric
+    # take out no rabies and service dog off the names 
+ mutate(DogName = if_else(DogName == "TEDDY (NO RABIES)",
+                           "TEDDY",
+                           DogName),
+         DogName = if_else(DogName == "TLETTIE ( SERVICE DOG)",
+                           "TLETTIE",
+                           DogName),
+        DogName = if_else(DogName == "WINSTON - (SERVICE DOG)",
+                           "WINSTON",
+                          DogName), 
+         DogName = if_else(DogName == "JOSEPH (NO RABIES)",
+                           "JOSEPH",
+                           DogName),
+        DogName = if_else(DogName == "JACOB (SERVICE DOG)",
+                           "JACOB",
+                           DogName) 
+        ) %>% 
+ 
+
+    # Sorting age groups 
+  filter(!is.na(DogAge)) %>%  # Remove rows with NA in DogAge after conversion
+  mutate(DogSize = factor(DogSize,
+                          levels = c("Small",
+                                     "Medium",
+                                     "Large")),
+         DogSex = factor(DogSex) ) %>% 
+
+    # Sorting all the dog breed and group them 
+  mutate(breed = if_else(breed == "AIRDALE TERRIER"|
+                           breed == "TERRIER (AIREDALE)"|
+                           breed == "AIREDALE TERRIER",
+                         true = "Airdale Terrier",
+                         breed),
+         breed = if_else(breed == "AMERICAN BULLY MIX"|
+                           breed == "AMERICAN BULL DOG MIX"|
+                           breed == "ENGLISH BULLDOG"|
+                           breed == "BULLDOG MIX" |
+                           breed == "BULL MASTIFF CROSS",
+                         true = "Bulldog Mix",
+                         breed),
+         breed = if_else(breed == "AUSTRAILIAN CATTLE DOG"|
+                           breed == "AUSTRALIAN CATTLE DOG"|
+                           breed == "CATTLE DOG MIX"|
+                           breed == "CATTLE DOG, AUSTRALIAN MIX"|
+                           breed == "AUSTRALIAN CATTLE DOG MIX"|
+                           breed == "AUSSIE/CORGI MIX",
+                         true="Australian Cattle Dog",
+                         breed),
+         breed = if_else(breed == "AUSTRALIAN SHEPARD"|
+                           breed == "AUSTRALIAN SHEP"|
+                           breed == "AUSTRALIAN SHEPHERD"|
+                           breed == "AUSTRAILIAN SHEPHERD MIX"|
+                           breed == "SHEPHERD, AUSTRALIAN"|
+                           breed == "AUSTRAILIAN SHEPHERD"|
+                           breed == "SHEPHERD (AUSTRALIAN)"|
+                           breed == "MINI AUSSIE SHEPHERD"|
+                           breed == "AUST. SHEPHERD MIX"|
+                           breed == "AUSTRAILIAN SHEPARD MIX"|
+                           breed == "AUSTRALIAN SHEPHERD MIX"|
+                           breed == "SHEPHERD, AUSTRAILAN MIX"|
+                           breed == "SHEEPDOG, SHETLAND MIX"| 
+                           breed == "HEELER MIX",
+                         true="Australian Shepard",
+                         breed),
+         breed = if_else(breed == "BICHON"|
+                           breed == "BICHON FRISE"|
+                           breed == "HAVANESE",
+                         true = "Bichon Frise", 
+                         breed), 
+         breed = if_else(breed == "BRUSSELS GRIFFON"|
+                           breed == "BRUSSELS GRIFFON", 
+                         true = "Brussels Griffon", 
+                         breed),
+         breed = if_else(breed == "BERNESE MOUNT."|
+                           breed == "MOUNTAIN DOG, BERNESE, POODLE"|
+                           breed == "BERNESE MOUNTAIN DOG"|
+                           breed == "MOUNTAIN DOG, BERNESE MIX",
+                         true="Bernese Mountain Dog",
+                         breed),
+         breed = if_else(breed == "BULLDOG, FRENCH"|
+                           breed == "FRENCH BULLDOG"|
+                           breed == "BULLDOG (FRENCH)",
+                         true="French Bulldog",
+                         breed),
+         breed = if_else(breed == "CAIRN"| 
+                           breed == "CAIRN TERRIER"|
+                           breed == "CARIN TERRIER MIX"|
+                           breed == "CANINE"|
+                           breed == "CAIRN TERRIER MIX",
+                         true="Cairn Terrier",
+                         breed),
+         breed = if_else(breed == "CATAHOULA LEOPARD DOG"|
+                           breed == "CATAHOULA",
+                         true = "Catahoula",
+                         breed),
+         breed = if_else(breed == "CATAHULA MIXED"|
+                           breed == "CATAHOULA MIX",
+                         true="Catahula Mix",
+                         breed),
+          breed = if_else(breed == "CANE CORSO"|
+                          breed == "CANE CORSO/ITALIAN MASTIFF",
+                         true = "Cane Corso",
+                         breed),
+         breed = if_else(breed == "COTON DE TULEAR", 
+                          true = "Coton de Tulear",
+                          breed), 
+         breed = if_else(breed == "CHINESE CRESTED", 
+                          true = "Chinese Crested Dog",
+                          breed), 
+         breed = if_else(breed == "DOBERMAN PINSCHER", 
+                          true = "Dobermann",
+                          breed),
+         breed = if_else(breed == "CHIHUAHUA"|
+                           breed == "CHIHUAHUA/BEAGLE MIX"|
+                           breed == "CHIHUAHUA MIX"|
+                           breed == "CHIHUAHUA, SHORT COAT"|
+                           breed == "CIHUAHUA TERRIER MIX"|
+                           breed == "CHUHUAHUA",
+                         true="Chihuahua",
+                         breed),
+         breed = if_else(breed == "COCK-A-POO"|
+                           breed == "COCKAPOO"|
+                           breed == "COCKAP0O",
+                         true="Cockapoo",
+                         breed),
+         breed = if_else(breed == "COLLIE (BORDER)"|
+                           breed =="COLLIE, BORDER"|
+                           breed == "COLLIE BORDER"|
+                           breed == "BORDER COLLIE"|
+                           breed == "COLLIE BORDE"|
+                           breed == "BEARDED COLLIE"|
+                           breed == "SCOTCH COLLIE",
+                         true="Border Collie",
+                         breed),
+          breed = if_else(breed == "ENGLISH MASTIFF"| 
+                           breed == "MASTIFF, OLD ENGLISH"|
+                           breed == "ROTTWEILER MIX",
+                          true = "Mastiff",
+                          breed),
+         breed = if_else(breed == "FEIST"| 
+                           breed == "FIEST"| 
+                           breed == "FIEST MIX", 
+                          true = "Feist",
+                          breed),
+         breed = if_else(breed == "JINDO"| 
+                           breed == "KEESHOND"| 
+                           breed == "SAMOYED",
+                         true = "Spitz",
+                         breed), 
+          breed = if_else(breed == "MALAMUTE, ALASKAN"| 
+                           breed == "ALASKI",
+                         true = "Alaskan Malamute",
+                         breed),
+         breed = if_else(breed == "MINI. PINSCHER",
+                         true = "Miniature Pinscher",
+                         breed),
+         breed = if_else(breed == "GOLDEN DOODLE"|
+                           breed == "GOLDENDOODLE"|
+                           breed == "MINI GOLDEN DOODLE"|
+                           breed == "AUSSIE DOODLE",
+                         true = "Golden Doodle",
+                         breed),
+         breed = if_else(breed == "SHEP/COLLIE MIX"|
+                           breed == "COLLIE/LAB MIX"|
+                           breed == "BORDER COLLIE MIX",
+                         true = "Collie Mix",
+                         breed),
+         breed = if_else(breed == "GERMAN SHEPARD"|
+                           breed == "GERMAN SHEPHERD"|
+                           breed == "SHEPHERD DOG, GERMAN"|
+                           breed == "BERGER ALLEMAND"|
+                           breed == "SHEPHERD",
+                         true ="German Shepherd",
+                         breed),
+         breed = if_else(breed == "GERMAN SHEPARD MIX"|
+                           breed == "SHEPARD X"|
+                           breed == "SHEPARD MIX"|
+                           breed == "GERMAN SHEPHERD/CHOW MIX"|
+                           breed == "SHEPHERD MIX"|
+                           breed == "GERMAN SHEPHERD MIX"|
+                           breed == "SHEPHERD"|
+                           breed == "MIXED BELGIUM SHEPARD",
+                         true="German Shepherd Mix",
+                         breed),
+         breed = if_else(breed == "GERMAN POINTER, SHORTHAIRED"|
+                           breed == "GERMAN SHORT HAIR POINTER"|
+                           breed == "German Short Haired Pointer"|
+                           breed == "ENGLISH POINTER"|
+                           breed == "POINTER"|
+                           breed == "POINTER MIX"|
+                           breed == "ENG SETTER"|
+                           breed == "ENGLISH SETTER",
+                         true ="Pointer/setter",
+                         breed),
+         breed = if_else(breed == "GOLDEN RETREIVER" |
+                           breed == "GOLDEN RETRIEVER" |
+                           breed == "RETREIVER" |
+                           breed == "RETRIEVER" |
+                           breed == "GOLDEN RETRIEVER MIX" |
+                           breed == "RETRIEVER MIX" |
+                           breed == "GREAT PYRENEES/GOLDEN  MIX",
+                         true = "Golden Retriever",
+                         breed),
+         breed = if_else(breed == "GRIPHON"|
+                           breed == "GREYHOUND",
+                         true="Greyhound",
+                         breed),
+         breed = if_else(breed == "HOUND MIXED"|
+                           breed == "HOUND MIX"|
+                           breed == "COONHOUND MIX"|
+                           breed == "BLUETICK COON HOUND"|
+                           breed == "HOUND"|
+                           breed == "HOUND, PLOTT"|
+                           breed == "PLOTT HOUND"|
+                           breed == "NORWEGIAN ELKHOUND"|
+                           breed == "BASENJI"|
+                           breed == "VIZSLA",
+                         true="Hound Mix",
+                         breed),
+         breed = if_else(breed == "HUSKEY MIX"|
+                           breed == "HUSTY MIX"|
+                           breed == "HUSKY MIX"|
+                           breed == "HUSKY, SIBERIAN MIX"|
+                           breed == "HUSKY/LAB MIX"|
+                           breed == "HUSKY, SIBERIAN"|
+                           breed == "SIBERIAN HUSKY"|
+                           breed == "SHIBA INU" |
+                           breed == "HUSKY",
+                         true="Siberian Husky Mix",
+                         breed),
+       
+         breed = if_else(breed == "LAB RETREIVER"|
+                           breed == "LABRADOR RETRIVER"|
+                           breed == "LAB RETRIEVER"|
+                           breed == "LAB RETRIVER"|
+                           breed == "LABRADOR  RETRIEVER"|
+                           breed == "LABRADOR RETRIEVER"|
+                           breed == "Labrador Retriever"|
+                           breed == "RETRIEVE, LAB"|
+                           breed =="RETRIEVER, LABRADOR"|
+                           breed == "LAB"|
+                           breed == "LABRADOR"|
+                           breed == "LABRADOODLE"|
+                           breed == "RETREIVER"|
+                           breed == "CHOCOLATE LAB"|
+                           breed == "RETRIEVER/LABRADOR"|
+                           breed == "CHESAPEKE RETRIEVER" |
+                           breed == "NEWFOUNDLAND"| 
+                           breed == "RETRIEVER, FLAT COATED",
+                         true="Labrador Retriever",
+                         breed),
+         breed = if_else(breed =="RETRIEVER, LABRADOR MIX"|
+                           breed == "RETRIEVER/LABRADOR MIX"|
+                           breed == "LAB RETRIEVER MIX"|
+                           breed == "LABRADOR  RETRIEVER MIX"|
+                           breed == "LABRADOR MIX"|
+                           breed == "LABRADOR RETRIEVER MIX"|
+                           breed == "LAB MIX"|
+                           breed == "LABRADOODLE MIX"|
+                           breed == "RETRIEVER MIX"|
+                           breed == "LAB/HUSKY MIX"|
+                           breed == "LAB/SHEPHERD MIX"|
+                           breed == "MASTIFF/LAB"|
+                           breed == "AUSTRAILIAN LABRADOODLE"|
+                           breed == "LAB/CORGI MIX"|
+                           breed == "LAB/COLLIE MIX"|
+                           breed == "LAB/HOUND MIX"|
+                           breed == "BOXER/LAB/RETRIEVER MIX"|
+                           breed == "LAB / SHEPARD MIX"|
+                           breed == "LABRADOR CROSS"|
+                           breed == "RETREIVER MIX",
+                         true="Labrador Retriever Mix",
+                         breed),
+         breed = if_else(breed == "MINI SCHNAUZER"|
+                           breed == "MINIATURE SCHNAUZER"|
+                           breed == "SCHNAUZER, MINIATURE"|
+                           breed == "SCHNAUZER (MINI)",
+                         true="Miniature Schnauzer",
+                         breed),
+         breed = if_else(breed == "MIX"|
+                           breed == "MIXED"|
+                           breed == "MIXED BREED",
+                         true="Mixed Breed",
+                         breed),
+         breed = if_else(breed == "PEEKINESE MIX"|
+                           breed == "PEKINGESE MIX"|
+                           breed == "PEKINGESE SHIH TZU MIX"|
+                           breed == "PEKINGESE",
+                         true="Pekingese Mix",
+                         breed),
+         breed = if_else(breed == "PIT MIX"|
+                           breed =="PITBULL MIX"|
+                           breed == "PITBULL MIXED"|
+                           breed == "PITT BULL MIX"|
+                           breed == "PIT/LAB MIX"|
+                           breed == "PIT BULL MIX"|
+                           breed == "AM PIT BULL TER/MIX"| 
+                           breed =="PIT BULL - AMERICAN TERRIER"|
+                           breed == "AMERICAN BULL DOG MI"|
+                           breed == "AMERICAN BULL DOG MIX"|
+                           breed == "AMERICAN PIT BULL TERRIER/MIXE"|
+                           breed == "PIT BULL TERRIER"|
+                           breed == "PIT BULL"|
+                           breed == "PITBULL",
+                         true="Pitbull Mix",
+                         breed),
+         breed = if_else(breed == "POODLE"|
+                           breed == "MOYEN POODLE"|
+                           breed == "STANDARD POODLE"|
+                           breed == "POODLE (STANDARD)"|
+                           breed == "POODLE MIX"|
+                           breed == "MIX POODLE",
+                         true = "Poodle",
+                         breed),
+         breed = if_else(breed =="POODLE (MINI)"|
+                           breed == "MIN POODLE"|
+                           breed == "MINI POODLE"|
+                           breed == "POODLE MIN/YORKSHIRE TERR"|
+                           breed == "POODLE, MINI/GOLDEN"|
+                           breed == "MINIATURE POODLE"|
+                           breed == "PEKE-A-POO"|
+                           breed == "PEEKAPOO"|
+                           breed == "POODLE, MINIATURE" | 
+                           breed == "POODLE, TOY MIX" | 
+                           breed == "POODLE/SHIH TZU"|
+                           breed == "MINIATURE POODLE MIX",
+                         true="Miniature Poodle",
+                         breed),
+         breed = if_else(breed == "PUG"|
+                           breed == "PUGGLE"|
+                           breed == "PUG MIX",
+                         true="Pug",
+                         breed),
+
+         breed = if_else(breed == "SHAR PEI"|
+                           breed == "SHARPEI"|
+                           breed == "SHAR-PEI MIX"|
+                           breed == "SHAR-PEI"|
+                           breed == "SHARPEI MIX",
+                         true="Shar-Pei",
+                         breed),
+         breed = if_else(breed == "STAFFORDSHIRE TERRIER MIXED"|
+                           breed == "STAFFORDSHIRE MIX"|
+                           breed == "AMERICAN STAFFORDSHIRE TERRIER"|
+                           breed == "AM STAFFORDSHIRE"|
+                           breed == "TERRIER, STAFFORDSHIRE"|
+                           breed == "STAFFORDSHRE TERRIER"|
+                           breed == "STAFFORDSHIRE TERRIER"|
+                           breed == "STAFFORD TERRIER MIX",
+                         true="Stafford Terrier Mix",
+                         breed),
+         breed = if_else(breed == "SHIH TZU"|
+                           breed == "SHIH-TZU"|
+                           breed == "SHIHTZU"|
+                           breed == "SHIH TZU/MIX"|
+                           breed == "SHIH TZU MIX"|
+                           breed == "SHIH TZU/POODLE",
+                         true="Shih-Tzu",
+                         breed),
+         breed = if_else(breed == "TERRIER X"|
+                           breed == "TERRIOR"|
+                           breed == "TERRIER"|
+                           breed == "BORDER TERRIER MIX" |
+                           breed == "TERRIER MIX"|
+                           breed == "NORFOLK TERRIER"|
+                           breed == "BOSTON TERRIER"|
+                           breed == "TERRIER/YORKSHIRE"|
+                           breed == "TERRIER (SMOOTH FOX)"|
+                           breed == "SILKY TERRIER"|
+                           breed == "TERRIER MIX"|
+                           breed == "BORDER TERRIER"|
+                           breed == "TERRIER/CORGI MIX"|
+                           breed == "RAT TERRIER"|
+                           breed == "WHEATEN TERRIER"|
+                           breed == "SOFT COATED WHEATON TERRIER"|
+                           breed == "YORKSHIRE TERRIER",
+                         true="Terrier",
+                         breed),
+         breed = if_else(breed == "JACK RUSSELL TERRIER MIX"|
+                           breed == "JACK RUSSELL TERRRIER MIX"|
+                           breed == "TERRIER, JACK RUSSELL MIX"|
+                           breed == "JACK RUSSELL MIX"|
+                           breed == "JACK RUSSELL"|
+                           breed == "JACK RUSSELL TERRIER",
+                         true="Jack Russell Terrier",
+                         breed),
+         breed = if_else(breed == "TERRIER (SCOTTISH)"|
+                           breed == "SCOTTISH TERRIER"|
+                           breed == "TERRIER SCOTTISH",
+                         true="Scottish Terrier",
+                         breed),
+         breed = if_else(breed == "WEST HIGHLAND WHITE TERRIER"|
+                           breed == "WEST HIGHLAND TERRIER",
+                         true="West Highland Terrier",
+                         breed),
+         breed = if_else(breed == "DALMATION"|
+                           breed == "DALMATIAN MIX",
+                         true = "Dalmation",
+                         breed),
+         breed = if_else(breed == "BLUE HEELER, AUSTRILIAN MIX"|
+                           breed == "QUEENSLAND BLUE HEALER",
+                         true = "Blue Heeler",
+                         breed),
+         breed = if_else(breed == "DASCHUND/TERRIER MIX"|
+                           breed == "DASCHUND MIX"|
+                           breed == "DACHSHUND MIX"|
+                           breed == "DACHSUND"|
+                           breed == "MINI DACHSHUND"|
+                           breed == "MINI DACHAUND",
+                         true = "Dachshund",
+                         breed),
+         breed = if_else(breed == "PETIT BASSETT GRIFFON VENDEEN"|
+                           breed == "BASSET HOUND"|
+                           breed == "BASSET HOUND MIX",
+                         true = "Basset Hound",
+                         breed),
+
+         breed = if_else(breed == "GREAT PYRENEES", 
+                         true = "Great Pyrenees",
+                         breed),
+         breed = if_else(breed == "BEAGLE"|
+                           breed == "BEAGLE MIX",
+                         true = "Beagle",
+                         breed),
+         breed = if_else(breed == "BOXER"|
+                           breed == "BOXER MIX"|
+                           breed == "BOXER/HOUND",
+                         true = "Boxer",
+                         breed),
+         breed = if_else(breed == "POMERANIAN MIX"|
+                           breed == "POM MIX" |
+                           breed == "POMERANIAN",
+                         true = "Pomaranian",
+                         breed),
+         breed = if_else(breed == "SPRINGER SPANIEL"|
+                           breed == "SPANIEL, COCKER ENG"|
+                           breed == "SPANIEL MIX"|
+                           breed == "CAVALIER KING CHARLES SPANIEL"|
+                           breed == "CAVALIER KING SPANIEL"|
+                           breed == "ENGLISH SPRINGER SPANIEL"|
+                           breed == "KING CHARLES CAVALIER SPANIEL"|
+                           breed == "COCKER SPANIEL"|
+                           breed == "SPANIEL, BRITTANY"|
+                           breed == "ENGLISH COCKER SPANIEL"|
+                           breed == "BRITTANY SPANIEL"|
+                           breed == "CAVA/POO"| 
+                           breed == "CAVAPOO"|
+                           breed == "PAPILLON",
+                        true = "Spaniel",
+                        breed),
+         breed = if_else(breed == "MALTESE"|
+                           breed == "MALTESE MIX"| 
+                           breed == "MORKIE",
+                         true = "Maltese",
+                         breed),
+
+         breed = if_else(breed == "CORGI"|
+                           breed == "CORGIE MIX"|
+                           breed == "PEMBROKE WELSH CORGI"|
+                           breed == "WELSH CORGI"|
+                           breed == "WELSH CORGI MIX",
+                         true = "Corgi",
+                         breed),
+         breed = if_else(breed == "MOUNTAIN CUR"|
+                            breed == "MOUTAIN CUR MIX",
+                          true = "Mountian Cur",
+                          breed), 
+
+         breed = if_else(breed == "PORTUGUESE WATER DOG",
+                         true="Portuguese Water Dog",
+                         breed),
+         breed = if_else(breed == "SAINT BERNARD",
+                         true="Saint Bernard",
+                         breed),
+         breed = if_else(breed == "GREAT DANE"|
+                           breed == "GREAT DANE MIX",
+                         true = "Great Dane",
+                         breed),
+          breed = if_else(breed == "SHETLANE SHEEP DOG",
+                         true = "Shetland Sheepdog",
+                         breed),
+         breed = if_else(breed == "MUDI",
+                         true = "Mudi",
+                         breed),
+         breed = if_else(breed == "STABYHOUN",
+                         true = "Stabyhoun",
+                         breed),
+        ) %>% 
+
+  
+  # rename all the Dog color
+  mutate(color = if_else(color == "YELLOW"| color == "HONEY"|
+                           color == "TAN/YELLOW"| color == "YELLOW/WHITE",
+                         true = "Yellow",
+                         color),
+         
+         color = if_else(color == "WHITE"|
+                           color == "BLONDE"|
+                           color == "CREAM"| color == "IVORY",
+                         true = "White",
+                         color),
+         color = if_else(color == "TAN"| 
+                           color == "TAN WHITE"| color == "TAN W/ WHITE"|
+                           color == "TAN AND WHITE"|
+                           color == "TAN AND CREAM"|
+                           color == "TAN WITH WHITE"| color == "WHITE/TAN",
+                         true = "Tan",
+                         color),
+         color = if_else(color == "BLACK"| 
+                           color == "TATTOO",
+                         true = "Black",
+                         color),
+                  color = if_else(color == "BROWN"|
+                           color == "BEIGE"| color == "FAWN"|
+                          color == "RED MERLE"| color == "TAN/RED"|
+                           color == "APRICOT/RED"| color == "RED AND TAN"|
+                           color == "RED/BROWN"| color == "RED/MAHOGANY"|
+                           color == "BROWN WITH TAN"|
+                           color == "SABLE"| color == "SHADED SABLE"|
+                           color == "DARK TAN"| color == "APRICOT"|
+                           color == "BUFF"| color == "CARAMEL"|
+                           color == "CARMEL"| color == "TAN/BROWN"|
+                           color == "CHOCOLATE"|
+                           color == "RED"|
+                           color == "DARK BROWN"| color == "BROWN10/24/2017"|
+                           color == "REDDISH TAN"| color == "LIGHT BROWN"|
+                           color == "BROWN/ORANGE"| color == "CHESTNUT"|
+                           color == "LIVER"| color == "BAY & WHITE",
+                         true = "Brown",
+                         color),
+         color = if_else(color == "GOLDEN"|
+                           color == "GOLD"|
+                           color == "LIGHT GOLD"| color == "WHEATEN"|
+                           color == "WHEATON"| color == "WHEAT",
+                         true = "Golden",
+                         color),
+          color = if_else(color == "GREY"| color == "GRAY"|
+                           color == "SILVER/GREY"| color == "SILVER"|
+                           color == "BLUE ROAN"| color == "TAN W/ BLUE BRINDLE"|
+                           color == "CHARCOAL"| color == "BLUE",
+                         true = "Gray",
+                         color),
+         
+         color = if_else(color == "BLACK/WHITE"| color == "BLACK&WHITE"|
+                           color == "WHITE/BLCK"| color == "BLACK W/WHITE SPOTS"|
+                           color == "BLACK AND WHITE"| color == "WHITE/BLACK"|
+                           color == "BLACK WITH WHITE"| color == "BLACK W/WHITE"|
+                           color == "BLACK & WHITE"|
+                           color == "BLACK/CREAM"| color == "WHITE W/BLACK EAR"|
+                           color == "WHITE, BLACK SPOTS"| color == "BLACK/ WHITE"|
+                           color == "SALT/PEPPER",
+                         true = "Black and White",
+                         color),
+
+         color = if_else(color == "BLACK/TAN"| 
+                           color == "BLACK & TAN"| color == "BLACK AND TAN"|
+                           color == "TAN W/BLACK"| color == "TAN/BLK"|
+                           color == "BLACK / TAN"| color == "BLACK TAN"|
+                           color == "BLACK W/BRWN WHT"| color == "BLK/TAN"|
+                           color == "TAN/BLACK",
+                         true = "Black and Tan",
+                         color),
+         color = if_else(color == "BRINDLE",
+                           true = "Brindle",
+                         color),
+         color = if_else(color == "BRINDLE/WHITE"| color == "BRINDLE/WITH WH"|
+                           color == "SILVER/BRINDLE"| 
+                           color == "GREY/TAN",
+                         true = "Brindle Mix",
+                         color),
+         color = if_else(color == "WHITE/BROWN"| color == "WHITE AND TAN"|
+                           color == "BROWN/WHITE"| color == "TAN W/WHITE"|
+                           color == "BROWN & WHITE"| color =="TAN/WHITE"|
+                           color == "FAWN AND WHITE"| color == "CHOCOLATE/WHITE"|
+                           color == "FAWN & WHITE"| color == "LIVER AND WHITE"|
+                           color == "BROWN / WHITE"| color == "WHITE AND FAWN"|
+                           color == "BROWN MERLE"| color == "RED/WHITE"|
+                           color == "BROWN AND WHITE"| color == "BROWN/TAN"|
+                           color == "WHITE/BUFF"| color == "TAUPE/WHITE"|
+                           color == "RED AND WHITE"| color == "WHITE & RED"|
+                           color == "WHITE AND BROWN"| color == "ORANGE/WHITE"|
+                           color == "APRICOT/WHITE"| color == "BUFF/WHITE"|
+                           color == "WHITE, ORANGE SPOTS"| color == "WHITE & BRINDLE"|
+                           color == "ORANGE AND WHITE"| color == "WHITE/ORANGE"|
+                           color == "BLENHEIM",
+                         true = "White and Brown",
+                         color),
+         color = if_else(color == "BLACK/BROWN"| color == "BLACK & BROWN"|
+                           color == "BLACK AND BROWN"| color == "BROWN/BLACK"|
+                           color == "BLACK AND RED"| 
+                           color == "RED/BLACK"| color == "BLACK AND RUST"|
+                           color == "RED AND BLACK"| color == "BLACK AND BRINDLE"|
+                           color == "BLK/BROWN",
+                         true = "Black and Brown",
+                         color),
+         color = if_else(color == "GREY/WHITE"| color == "GREY AND WHITE"|
+                           color == "GRAY/WHITE"| color == "WHITE/GRAY"|
+                           color == "GRAY AND WHITE"| color == "BLUE MERLE AND WHITE"|
+                           color == "BLUE MERLE/WHITE"| color == "BLUE MERLE"|
+                           color == "BLUE / WHITE"| color == "MERLE",
+                         true = "Gray and White",
+                         color),
+         color = if_else(color == "BLACK/GRAY"| color == "BLACK/SILVER"|
+                           color == "SILVER/BLACK",
+                         true = "Black and Gray",
+                         color),
+         color = if_else(color == "TRI COLOR"| color == "TRI"|
+                           color == "TRI-COLOR"| color == "RED TRICOLO"|
+                           color == "TRI/BLOND"| 
+                           color == "TAN / WHITE / BLACK"| color == "BRINDLE, TRI"|
+                           color == "TAN/BLACK/WHITE"| color == "WHITE/BLACK/BROWN"|
+                           color == "BROWN/TAN/WHITE"| color =="BLACK/BROWN/WHITE"|
+                           color == "TRICOLOR"| color == "BLACK/WHITE/SMOKE"|
+                           color == "BLACK/MULTI"| color == "BLACK/WHITE/BROWN"|
+                           color == "BROWN/BLACK/WHITE"| color == "BLACK / WHITE"|
+                           color == "WHITE AND BLACK"| color == "TRI-COLORED",
+                         true = "Tri Color",
+                         color) )
+ 
+```
+
+###Summary:
+The dataset of registered dogs in Burlington, Vermont, initially presented significant challenges due to its complexity and inconsistency in data entries. With over 20 variations for a single breed like the Labrador Retriever Mix and more than 30 different descriptors for a brown dog color, the dataset required extensive cleaning and standardization. The cleaning process involved filtering out incomplete records, standardizing textual data such as dog names, breeds, and colors, and reclassifying breeds and colors to reduce fragmentation. This effort streamlined the breed count from 789 to 62 and brought coherence to the data. The transformed dataset is now significantly more manageable and ready for meaningful analysis, providing a clearer and more accurate representation of Burlington's registered dog population.
+
+## Breeds in Burlington Ranked by Count
+```{r 3. Arrange by breed, message=FALSE, warning=FALSE}
+# Group the data by the 'breed' column
+
+dogsorted_breed <- dogdata1 %>% 
+  group_by(breed) %>% 
+  # Count the number of entries for each breed and sort the counts in descending order
+  tally(sort = T) 
+
+tibble(dogsorted_breed)
+```
+
+### Insights 
+In Burlington, Vermont, the most common dog breeds among registered pets are Labrador Retrievers (54) and Mixed Breeds (53), followed by Labrador Retriever Mixes (44). Other prevalent breeds include Golden Retrievers, Terriers, and Hound Mixes. This data reflects the diversity of the dog population in Burlington, with a notable preference for Labrador Retrievers and mixed-breed dogs.
+
+
+## 4a. Distrobution of Labrador Retrievers in Burlington 
+```{r 4a. Distrobution of Labrador Retrievers in Burlington, message=FALSE, warning=FALSE}
+
+# Filter the dataset for Labrador Retrievers only
+dogLR <- dogdata1 %>%
+  filter(breed == "Labrador Retriever") 
+
+# Create a bar chart for dog size distribution colored by the dogs' color
+ggplot(data = dogLR,
+       mapping = aes(x = DogSize,
+                     fill = color))+
+  geom_bar(width = 0.7) +
+  labs(x = "Size",
+       y = "Count",
+       fill = "Color",
+       title = "Dog Size Distribution of Labrador Retriever") +
+  scale_y_continuous(expand = c(0, 0, 0.05, 0),
+                     breaks = seq(0, 40, by = 10),
+                     limit = c(0, max(40))) +  # Set y-axis expansion for visual clarity
+  scale_x_discrete(expand = c(0, 0)) +  # Set x-axis expansion
+  
+  # Define manual colors for the 'color' variable
+  scale_fill_manual(values = c("Black" = "black",
+                                "Black and White" = "grey",
+                                "Brown" = "burlywood4", 
+                                "Tan" = "tan", 
+                                "White" = "white", 
+                                "Yellow" = "lightgoldenrod2"
+                                )) + 
+  
+  theme(
+    panel.background = element_rect(fill = "lightyellow"),
+    plot.background = element_rect(fill = "lightyellow"),  # Change outer background
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank()) # Remove minor grid lines 
+
+# Create a histogram to visualize the age distribution of Labrador Retrievers
+ggplot(data = dogLR, 
+       aes(x = DogAge)) +
+  
+  geom_histogram(binwidth = 1, 
+                 fill = "steelblue",
+                 color = "black") +
+  #Add labels 
+  labs(title = "Age Distribution of Labrador Retrievers",
+       x = "Age (years)",
+       y = "Number of Dogs",
+       caption = "Dashed line represents average age") +
+  scale_y_continuous(expand = c(0, 0, 0.05, 0),
+                     breaks = seq(0, 8, by = 1),
+                     limit = c(0, max(8)) )+  # Set y-axis expansion 
+  scale_x_continuous(breaks = seq(0, 15, by = 1),) +  # Set breaks on the x-axis 
+  geom_vline(aes(xintercept = mean(DogAge)),  # Add a vertical line for the mean age
+             color = "red", 
+             linetype = "dashed", size = 1) +
+  #Remove grid lines and add color
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "lightyellow"),
+        plot.background = element_rect(fill = "lightyellow")) 
+
+
+# Create a bar chart to visualize the sex distribution of Labrador Retrievers
+  ggplot(data = dogLR, 
+       aes(x = DogSex, 
+           fill = DogSex)) +
+  geom_bar(width = 0.7) +
+  labs(title = "Sex Distribution of Labrador Retrievers",
+       x = "Sex",
+       y = "Count") +
+    # Assign colors to different sexes
+  scale_fill_manual(values = c("M" = "lightblue",
+                               "F" = "pink")) + 
+  scale_y_continuous(expand = c(0, 0, 0.05, 0)) +  # Set y-axis expansion 
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "lightyellow"),
+        plot.background = element_rect(fill = "lightyellow"),
+        ) 
+
+# Calculate the count and proportion of spayed/neutered Labrador Retrievers
+neuter_status_counts <- dogdata1 %>%
+  group_by(DogIsSpayedOrNuetered) %>%
+  summarize(Count = n(), .groups = 'drop') %>%  # Group and summarize to get counts
+  mutate(Proportion = Count / sum(Count))  # Calculate proportion of the total
+
+
+# Create a pie chart to visualize the proportion of spayed/neutered status among Labrador Retrievers
+ggplot(data = neuter_status_counts, 
+       aes(x = "",
+           y = Proportion, 
+           fill = DogIsSpayedOrNuetered)) +
+  # Use bars to create pie segments
+  geom_bar(stat = "identity", 
+           width = 1,
+           color ="black") +
+  #Add the percentage in the pie chart 
+  geom_text(aes(label = scales::percent(Proportion)), 
+            position = position_stack(vjust = 0.5),
+            color = "steelblue") +
+
+  coord_polar("y", start = 0) +
+  scale_fill_manual(values = c("TRUE" = "lightblue", 
+                               "FALSE" = "lightcoral")) +
+  labs(x = NULL,
+       y = NULL,
+       fill = "Spayed/Neutered Status",
+       title = "Proportion of Spayed/Neutered Labrador Retrievers") +
+  theme(plot.title = element_text(hjust = 0.5),  # Center the plot title
+        legend.position = "bottom",# Place the legend to the bottom
+  )
+
+
+```
+
+### Insights 
+Size and Color Distribution of Labrador Retrievers: The distribution is heavily skewed towards larger-sized Labrador Retrievers, which is characteristic of the breed. Black Labs dominate the population, with brown as the second most common color. This suggests a preference for the traditional Labrador colors in Burlington, with other colors like tan, white, and black and white being less common.
+
+Age Distribution of Labrador Retrievers: The histogram illustrates that Labrador Retrievers are most frequently aged 1, 4, and 9 years, with a notable presence of dogs at 11 years old. There's a decrease in frequency as age increases, with the lowest number of dogs at age 5 and a slight increase again at age 15. The average age, marked by the dashed line in the histogram, indicates a mid-range age that is not the most common but suggests a balance across the sampled ages
+
+Sex Distribution of Labrador Retrievers: The nearly even split between male and female dogs suggests that there is no strong preference for a particular sex among Labrador Retriever owners in Burlington. This balance could be beneficial for maintaining a stable breeding population. 
+
+The pie chart indicates that 77% of Labrador Retrievers in the dataset have been spayed or neutered, with only 23% remaining. This suggests strong adherence to responsible pet ownership practices in terms of population control and animal welfare in the community.
+
+
+## 5. Most popular size and color dogs in Burlington 
+```{r 5. Most popular size and color dogs in Burlington, message=FALSE, warning=FALSE}
+
+# Create a density plot to visualize the distribution of dog sizes
+ggplot(data = dogdata1, 
+       aes(x = DogSize, 
+           fill = DogSize)) +
+
+  geom_density(alpha = 0.7) +  # Use geom_density to create the density plot with semi-transparency
+  #Add labels 
+  labs(title = "Density Plot of Dog Sizes in Burlington",
+       x = "Size",
+       y = "Density") +
+  scale_y_continuous(expand = c(0, 0, 0.05, 0)) +  # Set y-axis expansion for visual clarity
+  scale_x_discrete(expand = c(0, 0)) +  # Set x-axis expansion
+  scale_fill_brewer(palette = "Pastel1") + 
+  #Remove grid lines
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        )  
+
+
+# Prepare data for the heat map by grouping by 'DogSize' and 'color', then summarizing to get counts
+
+dog_size_color <- dogdata1 %>%
+  group_by(DogSize, color) %>%
+  summarize(count = n())
+
+# Create a heat map to visualize the counts of dogs by size and color
+ggplot(dog_size_color, 
+       aes(x = DogSize, 
+           y = color, 
+           fill = count)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "seashell", high = "plum4") +
+  scale_x_discrete(expand = c(0, 0)) + # Set x-axis expansion
+  # Add and remove labels
+  labs(title = "Heat Map of Dog Sizes and Colors in Burlington",
+       x = NULL,
+       y = NULL,
+       fill = "Count") +
+  #Remove grid lines
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())  
+
+```
+
+### Insights 
+Size and Color Correlation of Dogs in Burlington: The density plot indicates a preference for medium-sized dogs in Burlington, which is the most common size category. The heat map further illustrates this tendency, with certain colors like brown, black& white, black appearing more frequently within this size category. The color trends show that some colors are notably more prevalent in medium-sized dogs, reflecting a possible correlation between dog size and color preferences in the city.
+
+
+## 6. The relationship between dog size and their age
+```{r 6. Histogram of Dog Age and Size, message=FALSE, warning=FALSE}
+# Create a histogram to visualize the distribution of dogs' ages and how they relate to dog size
+
+ggplot(data = dogdata1, 
+        mapping = aes(x = DogAge,
+                      fill = DogSize))+
+    # Add histogram bars with a bin width of 1 year to show the age distribution
+  geom_histogram(binwidth = 1)+
+    # Apply a color palette to differentiate between the sizes of dogs
+  scale_fill_brewer(palette = "Blues",
+                    name = "Size")+
+  scale_y_continuous(expand = c(0, 0, 0.05, 0)) +
+  # Define the breaks on the x-axis to show every year up to 20 years
+  scale_x_continuous(breaks = seq(0, 20, by = 1))+
+  labs(title = "Distribution of Dog Age and Size",
+       x = "Age",
+       y = "Count") + 
+    # Remove grid lines
+   theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())  
+
+```
+
+### Insights 
+Based on the ditrubution of the histogram:  
+Young dogs are more numerous, suggesting a higher adoption rate for puppies and younger dogs in Burlington.
+As dogs age, smaller dogs seem to be more prevalent or maintain a steady count, which could point to longer lifespans for smaller dogs or a sustained preference for them in older age groups.
+
+## 4d. the relationship between dog sex and breed
+```{r 4d. the relationship between dog sex and breed, message=FALSE, warning=FALSE}
+
+# Create a contingency table of breed and sex
+breed_sex_table <- table(dogdata1$breed, dogdata1$DogSex)
+
+# Visualize the relationship between breed and sex using a bar plot
+ggplot(data = dogdata1,
+       aes(x = breed,
+           fill = DogSex)) +
+  # Create a stacked bar plot showing the proportion of each sex within each breed
+  geom_bar(position = "fill") +
+  # Scale the y-axis to show percentages with proper formatting
+  scale_y_continuous(labels = scales::percent_format(),
+                     expand = c(0, 0, 0.05, 0)) +
+  
+  labs(title = "Relationship Between Dog Breed and Sex",
+       x = NULL,
+       y = "Percentage within Breed") +
+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 6),  # Rotate the x-axis text 
+        panel.grid.major = element_blank(),  # Remove the major grid lines 
+        panel.grid.minor = element_blank()) +  # Remove the minor grid lines as well
+    # Use a color palette that provides distinct colors for different sexes
+  scale_fill_brewer(palette = "Pastel1")
+
+```
+
+### Insights 
+The intent of the analysis was to uncover potential correlations between the size of a dog and its breed. However, the resulting visualization did not yield the expected insights due to a significant number of breeds being underrepresented in the dataset—most having fewer than five instances. This low representation can lead to skewed results, as the data might not accurately reflect the broader population of these breeds. Consequently, it becomes challenging to draw any reliable conclusions about the relationship between breed and size from this graph alone. For future analysis, it would be beneficial to obtain a more balanced dataset where rare breeds are more adequately represented. 
+
+# Machine Learning
+## 4e. Predicting the probability of being male and summarizing these predictions by breed.
+```{r 4e. Predicting the probability of being male and summarizing these predictions by breed, message=FALSE, warning=FALSE}
+# Set a threshold for the minimum count to not group as "Other"
+threshold <- 5 
+
+# Create a new column for 'BreedGroup' that groups breeds with counts below the threshold
+dogdata2 <- dogdata1 %>%
+  mutate(BreedGroup = if_else(breed %in% names(which(table(breed) < threshold)), 
+                              true = 'Other', 
+                              breed))
+
+# Convert 'DogSex' to a binary factor
+dogdata2$DogSexBinary <- if_else(dogdata1$DogSex == "M", 
+                                 true = 1, 
+                                 0)
+
+# Fit logistic regression model
+model <- glm(DogSexBinary ~ BreedGroup, 
+             data = dogdata2, 
+             family = binomial)
+
+# Summary of the model to see coefficients
+summary(model)
+
+# Use the fitted model to predict the probability of being male for each dog
+dogdata2$predicted_sex <- predict(model, type = "response")
+
+# Summarize the data for plotting
+breed_sex_summary <- dogdata2 %>%
+  group_by(BreedGroup) %>%
+  summarise(AveragePredictedSex = mean(predicted_sex, na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(desc(AveragePredictedSex))
+
+# Set the factor levels of BreedGroup based on the order of AveragePredictedSex
+breed_sex_summary$BreedGroup <- factor(breed_sex_summary$BreedGroup, levels = breed_sex_summary$BreedGroup)
+
+# Plot a horizontal bar chart to visualize the predicted probabilities by breed group
+ggplot(data = breed_sex_summary, 
+       aes(x = BreedGroup, 
+           y = AveragePredictedSex,
+           fill = AveragePredictedSex)) +
+  geom_col(show.legend = FALSE) +  # Use bars to represent each breed group
+  coord_flip() +  # Flip the chart for horizontal layout
+  labs(x = NULL, 
+       y = "Predicted Probability of Being Male") +
+  theme(axis.text.y = element_text(size = 8),  # Adjust text size 
+        panel.grid.major.y = element_blank(),  # Remove horizontal grid lines 
+        panel.grid.minor.y = element_blank()) +  # Remove minor grid lines as well
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +  # Use a gradient for fill color
+  scale_x_discrete(expand = c(0, 0)) +  # Prevent expansion beyond the data range on the x-axis
+  scale_y_continuous(labels = scales::percent_format(),  # Format y-axis labels as percentages
+                     expand = c(0, 0, 0.05, 0))  
+```
+
+### Insights 
+The analysis of this graph focused on predicting the likelihood of a dog being male across different breeds, with a particular emphasis on enhancing the dataset's balance. Rare breeds, initially causing skewed insights due to their low occurrence, were consolidated into an "Other" category. This adjustment led to a more meaningful interpretation of the data, allowing for a clearer differentiation between common and rare breeds. The visualization now effectively illustrates the predicted male probability per breed, with the logistic regression model's output facilitating a more accurate representation of the dataset. The bar chart, with its color gradient, highlights the variance in male probability across breeds, offering a visual summary that underpins potential breed-specific trends. While this approach yields more reliable insights, it is still limited by the dataset's inherent biases and the representativeness of the "Other" category. Future analyses would benefit from a dataset with a more equitable distribution of breed occurrences to validate these findings further.
+
+
+## 5a. Dog name trends 
+```{r 5a. Dog name trendss, message=FALSE, warning=FALSE}
+
+# Extracting the column of dog names from the dataset for analysis
+dog_names <- dogdata1$DogName
+
+
+# Creating a frequency table of dog names to determine how often each name occurs
+name_frequency <- table(dog_names)
+# Converting the table to a data frame for easier manipulation and plotting
+name_frequency <- as.data.frame(name_frequency)
+# Renaming columns for clarity
+colnames(name_frequency) <- c("Name", "Frequency")
+# Sorting the data frame by frequency in descending order and selecting the top 10 names
+top_names <- name_frequency %>% arrange(desc(Frequency)) %>% head(10)
+
+# Creating a bubble chart to visualize the top 10 most frequent dog names
+ggplot(data = top_names, 
+       aes(x = Name, 
+           y = Frequency, 
+           size = Frequency, 
+           color = Frequency)) +
+  # Add points to the plot with a slight transparency to create bubbles
+  geom_point(alpha = 0.7) +
+  # Adjust the size range for the bubbles
+  scale_size(range = c(3, 15)) +
+  scale_color_gradient(low = "lightblue", high = "blue") +  # Adding a color gradient from light blue to blue
+  
+   # Set the limits of the y-axis to ensure it starts at 2 and extends to at least 10 
+  scale_y_continuous(breaks = seq(2, 10, 2), 
+                     limits = c(2, max(10)),
+                     expand = c(0, 0, 0.05, 0)) +
+  # Add labels and a title to the plot, remove the x-axis label for clarity
+  labs(title = "Top 10 Dog Names", 
+       x = NULL, 
+       y = "Frequency") +
+    # Adjust the text angle for x-axis labels and remove the legend for size
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position = "none",
+        panel.grid.minor = element_blank()) # Hide the legend for size
+
+
+
+# Perform a length analysis on the dog names
+# Calculate the length of each dog name
+name_length <- nchar(dog_names)
+
+# Create a frequency table for the lengths of names
+length_distribution <- table(name_length)
+
+# Convert the table to a data frame
+length_distribution <- as.data.frame(length_distribution)
+
+# Rename the columns for clarity
+colnames(length_distribution) <- c("Length", "Count")
+
+
+# Plot a lollipop chart to visualize the distribution of name lengths
+ggplot(data = length_distribution, 
+       aes(x = Length, 
+           y = Count)) +
+  # Add segments to the plot to create the lollipop sticks
+  geom_segment(aes(x = Length, 
+                   xend = Length, 
+                   y = 0, 
+                   yend = Count), 
+               color = "grey") +
+  # Add points to the top of the sticks to create the lollipops
+  geom_point(aes(color = Count), size = 5) +
+  
+    # Add a color gradient from light coral to red based on the count of names
+  scale_color_gradient(low = "lightcoral", high = "red") +
+  
+    # Add labels and a title to the plot
+  labs(title = "Distribution of Name Lengths", 
+       x = "Length of Name", 
+       y = "Count") +
+    # Set the limits of the y-axis to ensure it starts at 0 and extends to at least 200 
+   scale_y_continuous(breaks = seq(0, 200, 20), 
+                     limits = c(0, max(200))) +
+    # Remove the legend for color and remove minor grid lines for a cleaner look
+  theme(legend.position = "none",
+        panel.grid.minor = element_blank()
+        )
+``` 
+#Insight 
+Top 10 Dog Names Bubble Chart:
+This chart showcases the most popular dog names in the dataset. Each bubble represents a name, and the size of the bubble corresponds to how frequently the name occurs.
+The largest bubble is notably larger than the others, indicating that one name is particularly common among the dogs.
+The names are spread out horizontally, and no particular order is evident from the image provided, such as alphabetical or frequency-based.
+
+Distribution of Name Lengths Lollipop Chart:
+This chart shows the frequency of different name lengths. Each "lollipop" represents a specific length of name, and the size of the circle at the end of the "lollipop" indicates the count of names of that length.
+There's a clear peak at a certain length between 4-6 characters, suggesting that most of the dog names have this length.
+The counts decrease for longer and shorter names, indicating a preference for names within a moderate length.
+
+## 5b. Dog name word cloud visual 
+```{r 5a. Dog name word cloud visual, message=FALSE, warning=FALSE}
+# Create a Word Cloud with a more vibrant color palette
+wordcloud(words = dog_names, 
+          scale=c(4,0.5), # 4: max size for frequent words, 0.5: min size for less frequent words
+          max.words= 100,  # Display up to 100 words
+          random.order= FALSE, 
+          rot.per=0.25,  # 25% of the words will be rotated
+          colors= brewer.pal(8, "Set3")) 
+```
+### Insights 
+
+Word Cloud:
+The word cloud visualizes the frequency of sample part if  dog names, with the size of each word reflecting its relative frequency.
+The largest words in the center ("Charlie", "Bella", "Luna", "Daisy", and "Rosie") are presumably the most common names.
+The distribution of sizes gives a quick visual impression of the variety and popularity of names.
+Data Completeness and Accuracy:
+The dataset might not include all Burlington's dogs since not all dogs are registered, possibly due to cost or because they are strays.
+The accuracy of data is dependent on the dog owners' input at registration. Mistakes or variations in how dog breeds or colors are reported can introduce inconsistencies.
+
+###  Limitations of the Project Based on the Available Variables
+#Data Completeness and Accuracy:
+The dataset might not include all Burlington's dogs since not all dogs are registered, possibly due to cost or because they are strays.
+The accuracy of data is dependent on the dog owners' input at registration. Mistakes or variations in how dog breeds or colors are reported can introduce inconsistencies.
+
+#Inconsistent Data integrity 
+accuracy and consistency of data throughout was very random like some of them are capitalized some are not and misspelling Limited qualitative data analysis
+
+#Limited Qualitative data
+The limitation in my project due to limited qualitative data is significant because it narrows the scope of my analysis. I only have one numerical variable to work with, which limits the types of statistical techniques I can use. Also, having two variables that are nearly identical doesn't help; it just means I'm using up valuable data space without adding new insights.
+
+#Breed Specific Analysis:
+The breed information may be too generic or too specific in some cases, making it difficult to group breeds for analysis without subjective interpretation.
+Some breeds may be underrepresented, leading to potential biases in breed-specific conclusions.
+
+
